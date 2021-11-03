@@ -100,5 +100,16 @@ describe('updateAnnotations', () => {
       properties: []
     });
     tester.delete('f', AnnotationType.AXIS_ALIGNED_BOUNDING_BOX);
+
+    tester.update(
+      { id: 'g', type: AnnotationType.FIXPOINT, fixpoint: Float32Array.of(1, 2), properties: [] });
+    tester.delete('g', AnnotationType.FIXPOINT);
+    tester.update(
+      { id: 'g', type: AnnotationType.FIXPOINT, fixpoint: Float32Array.of(1, 2), properties: [] });
+
+    tester.update(
+      { id: 'h', type: AnnotationType.FIXPOINT, fixpoint: Float32Array.of(2, 3), properties: [] });
+
+
   });
 });

@@ -48,6 +48,7 @@ export class AnnotationReference extends RefCounted {
 
 export enum AnnotationType {
   POINT,
+  FIXPOINT,
   LINE,
   AXIS_ALIGNED_BOUNDING_BOX,
   ELLIPSOID,
@@ -55,6 +56,7 @@ export enum AnnotationType {
 
 export const annotationTypes = [
   AnnotationType.POINT,
+  AnnotationType.FIXPOINT,
   AnnotationType.LINE,
   AnnotationType.AXIS_ALIGNED_BOUNDING_BOX,
   AnnotationType.ELLIPSOID,
@@ -463,6 +465,11 @@ export interface Point extends AnnotationBase {
   type: AnnotationType.POINT;
 }
 
+export interface Fixpoint extends AnnotationBase {
+  fixpoint: Float32Array;
+  type: AnnotationType.FIXPOINT;
+}
+
 export interface AxisAlignedBoundingBox extends AnnotationBase {
   pointA: Float32Array;
   pointB: Float32Array;
@@ -475,7 +482,7 @@ export interface Ellipsoid extends AnnotationBase {
   type: AnnotationType.ELLIPSOID;
 }
 
-export type Annotation = Line|Point|AxisAlignedBoundingBox|Ellipsoid;
+export type Annotation = Line|Point|Fixpoint|AxisAlignedBoundingBox|Ellipsoid;
 
 export interface AnnotationTypeHandler<T extends Annotation = Annotation> {
   icon: string;
@@ -589,6 +596,35 @@ export const annotationTypeHandlers: Record<AnnotationType, AnnotationTypeHandle
             },
     visitGeometry(annotation: Point, callback) {
       callback(annotation.point, false);
+    },
+  },
+  [AnnotationType.FIXPOINT]: {
+    icon: '○',
+    description: 'Fixpoint',
+    toJSON: (annotation: Fixpoint) => {
+      return {
+        fixpoint: Array.from(annotation.fixpoint),
+      };
+    },
+    restoreState: (annotation: Fixpoint, obj: any, rank: number) => {
+      annotation.fixpoint = verifyObjectProperty(
+        obj, 'fixpoint', x => parseFixedLengthArray(new Float32Array(rank), x, verifyFiniteFloat));
+    },
+    serializedBytes: rank => rank * 4,
+    serialize:
+      (buffer: DataView, offset: number, isLittleEndian: boolean, rank: number,
+        annotation: Fixpoint) => {
+        serializeFloatVector(buffer, offset, isLittleEndian, rank, annotation.fixpoint);
+      },
+    deserialize:
+      (buffer: DataView, offset: number, isLittleEndian: boolean, rank: number, id: string):
+        Fixpoint => {
+        const fixpoint = new Float32Array(rank);
+        deserializeFloatVector(buffer, offset, isLittleEndian, rank, fixpoint);
+        return { type: AnnotationType.FIXPOINT, fixpoint, id, properties: [] };
+      },
+    visitGeometry(annotation: Fixpoint, callback) {
+      callback(annotation.fixpoint, false);
     },
   },
   [AnnotationType.AXIS_ALIGNED_BOUNDING_BOX]: {
@@ -937,6 +973,9 @@ export class LocalAnnotationSource extends AnnotationSource {
         case AnnotationType.POINT:
           annotation.point = mapVector(annotation.point);
           break;
+        case AnnotationType.FIXPOINT:
+          annotation.fixpoint = mapVector(annotation.fixpoint);
+          break;
         case AnnotationType.LINE:
         case AnnotationType.AXIS_ALIGNED_BOUNDING_BOX:
           annotation.pointA = mapVector(annotation.pointA);
@@ -1028,7 +1067,7 @@ function serializeAnnotations(
 }
 
 export class AnnotationSerializer {
-  annotations: [Point[], Line[], AxisAlignedBoundingBox[], Ellipsoid[]] = [[], [], [], []];
+  annotations: [Point[], Fixpoint[],Line[], AxisAlignedBoundingBox[], Ellipsoid[]] = [[], [], [], [], []];
   constructor(public propertySerializer: AnnotationPropertySerializer) {}
   add(annotation: Annotation) {
     (<Annotation[]>this.annotations[annotation.type]).push(annotation);

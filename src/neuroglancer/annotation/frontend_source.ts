@@ -560,6 +560,11 @@ export class MultiscaleAnnotationSource extends SharedObject implements
               tempLower, source.multiscaleToChunkTransform, rank + 1, annotation.point, rank);
           tempUpper.set(tempLower);
           break;
+        case AnnotationType.FIXPOINT:
+          matrix.transformPoint(
+            tempLower, source.multiscaleToChunkTransform, rank + 1, annotation.fixpoint, rank);
+          tempUpper.set(tempLower);
+          break;
         case AnnotationType.LINE:
         case AnnotationType.AXIS_ALIGNED_BOUNDING_BOX:
           matrix.transformPoint(

@@ -49,6 +49,7 @@ void emitCircle(vec4 position, float diameter, float borderWidth) {
   }
 }
 `);
+
   if (crossSectionFade) {
     builder.addFragmentCode(`
 float getCircleAlphaMultiplier() {
@@ -82,9 +83,11 @@ export function initializeCircleShader(
     shader: ShaderProgram, projectionParameters: {width: number, height: number},
     options: {featherWidthInPixels: number}) {
   const {gl} = shader;
+  
   gl.uniform3f(
       shader.uniform('uCircleParams'), 1 / projectionParameters.width,
       1 / projectionParameters.height, Math.max(1e-6, options.featherWidthInPixels));
+
 }
 
 export function drawCircles(

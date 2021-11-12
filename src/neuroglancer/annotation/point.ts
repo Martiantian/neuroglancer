@@ -67,6 +67,7 @@ ${this.setPartIndex(builder)};
 `);
   }
 
+
   private shaderGetter3d =
       this.getDependentShader('annotation/point:3d', (builder: ShaderBuilder) => {
         defineVertexId(builder);
@@ -74,7 +75,7 @@ ${this.setPartIndex(builder)};
         this.defineShaderCommon(builder);
         builder.addVertexMain(`
 emitCircle(uModelViewProjection *
-           vec4(projectModelVectorToSubspace(modelPosition), 1.0), ng_markerDiameter, ng_markerBorderWidth);
+            vec4(projectModelVectorToSubspace(modelPosition), 1.0), ng_markerDiameter, ng_markerBorderWidth);
 `);
         builder.setFragmentMain(`
 vec4 color = getCircleColor(vColor, vBorderColor);

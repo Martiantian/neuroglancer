@@ -25,6 +25,9 @@ import {defineLineShader, drawLines, initializeLineShader} from 'neuroglancer/we
 import {ShaderBuilder, ShaderProgram} from 'neuroglancer/webgl/shader';
 import {defineVectorArrayVertexShaderInput} from 'neuroglancer/webgl/shader_lib';
 import {defineVertexId, VertexIdHelper} from 'neuroglancer/webgl/vertex_id';
+import {tmpZoomFactor, tmpdisplayDimensionScales} from 'neuroglancer/navigation_state';
+import {tmpLogicalHeight} from 'neuroglancer/rendered_data_panel';
+import {tmporthographicProjectionJson, tmppaneltype} from 'neuroglancer/data_panel_layout';
 
 class RenderHelper extends AnnotationRenderHelper {
   private defineShaderCommon(builder: ShaderBuilder) {
@@ -32,7 +35,9 @@ class RenderHelper extends AnnotationRenderHelper {
     // Position of point in model coordinates.
     defineVectorArrayVertexShaderInput(
         builder, 'float', WebGL2RenderingContext.FLOAT, /*normalized=*/ false, 'VertexPosition',
-        rank);
+    rank);
+    builder.addAttribute('highp float', 'afactor');
+    builder.addAttribute('highp float', 'aperspective_state');
     builder.addVarying('highp vec4', 'vBorderColor');
     builder.addVertexCode(`
 float ng_markerDiameter;
@@ -51,7 +56,7 @@ void setFixpointMarkerBorderColor(vec4 color) {
 }
 `);
     builder.addVertexMain(`
-ng_markerDiameter = 5.0;
+ng_markerDiameter = 1.0;
 ng_markerBorderWidth = 1.0;
 vBorderColor = vec4(0.0, 0.0, 0.0, 1.0);
 float modelPosition[${rank}] = getVertexPosition0();
@@ -74,12 +79,19 @@ ${this.setPartIndex(builder)};
         defineCircleShader(builder, /*crossSectionFade=*/ this.targetIsSliceView);
         this.defineShaderCommon(builder);
         builder.addVertexMain(`
-vec4 tmpPosition = uModelViewProjection *  vec4(projectModelVectorToSubspace(modelPosition), 1.0);
-float fudgeFactor = 3.0;
-float zToDivideBy = 1.0 + tmpPosition.z * fudgeFactor;
-ng_markerDiameter /= zToDivideBy;
+vec4 tmpPosition = uModelViewProjection * vec4(projectModelVectorToSubspace(modelPosition), 1.0);
+
+if (aperspective_state != 0.0){
+  float fudgeFactor = 3.0;
+  float zToDivideBy = 1.0 + tmpPosition.z * fudgeFactor;
+   ng_markerDiameter /= zToDivideBy;
+   ng_markerBorderWidth /= zToDivideBy;
+   ng_markerDiameter *= 3.0;
+   ng_markerBorderWidth *= 3.0;
+}
+ng_markerDiameter *=afactor;
 emitCircle(uModelViewProjection *
-           vec4(projectModelVectorToSubspace(modelPosition), 1.0), ng_markerDiameter, ng_markerBorderWidth);
+            vec4(projectModelVectorToSubspace(modelPosition), 1.0), ng_markerDiameter, ng_markerBorderWidth);
 `);
         builder.setFragmentMain(`
 vec4 color = getCircleColor(vColor, vBorderColor);
@@ -160,6 +172,21 @@ emitAnnotation(vec4(color.rgb, color.a * ${this.getCrossSectionFadeFactor()}));
     switch (numChunkDisplayDims) {
       case 3:
         this.enable(this.shaderGetter3d, context, shader => {
+          const { gl } = shader;
+          let perspective_state = 0.0;
+          let factor = 1.0;
+          let tmpscale = 0.0;
+          tmpscale = tmpZoomFactor / tmpLogicalHeight * tmpdisplayDimensionScales[0];
+          console.log(tmpscale);
+          if (tmppaneltype == '3d'){
+            factor = 0.00001 / tmpscale;
+            if (tmporthographicProjectionJson === undefined) {
+              perspective_state = 1.0;
+            }
+          }
+          gl.vertexAttrib1f(shader.attribute('afactor'), factor);
+
+          gl.vertexAttrib1f(shader.attribute('aperspective_state'), perspective_state);
           initializeCircleShader(
               shader, context.renderContext.projectionParameters, {featherWidthInPixels: 1});
           drawCircles(shader.gl, 1, context.count);

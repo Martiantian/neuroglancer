@@ -32,6 +32,7 @@ import {addControlsToBuilder, setControlsInShader, ShaderControlsBuilderState, S
 export type AnnotationShaderGetter =
     ParameterizedContextDependentShaderGetter<ShaderModule, ShaderControlsBuilderState>;
 
+
 export interface AnnotationRenderContext {
   buffer: Buffer;
   annotationLayer: AnnotationLayer;
@@ -203,7 +204,6 @@ export abstract class AnnotationRenderHelper extends RefCounted {
         builder.addUniform('highp vec3', 'uSubspaceMatrix', rank);
         // Transform from the rendered subspace of the model coordinate space to clip coordinates.
         builder.addUniform('highp mat4', 'uModelViewProjection');
-
         // Specifies center vector and per-dimension scale in model coordinates used for
         // clipping.
         builder.addUniform('highp float', 'uModelClipBounds', rank * 2);

@@ -42,6 +42,10 @@ import {VisibilityPrioritySpecification} from 'neuroglancer/viewer_state';
 import {DisplayDimensionsWidget} from 'neuroglancer/widget/display_dimensions_widget';
 import {ScaleBarOptions} from 'neuroglancer/widget/scale_bar';
 
+
+export let tmporthographicProjectionJson:any;
+export let tmppaneltype: any;
+
 export interface SliceViewViewerState {
   chunkManager: ChunkManager;
   navigationState: NavigationState;
@@ -453,6 +457,7 @@ for (const axes of AXES_RELATIVE_ORIENTATION.keys()) {
 }
 
 export function getLayoutByName(obj: any) {
+  tmppaneltype = obj;
   let layout = LAYOUTS.get(obj);
   if (layout === undefined) {
     throw new Error(`Invalid layout name: ${JSON.stringify(obj)}.`);
@@ -597,6 +602,7 @@ export class DataPanelLayoutSpecification extends RefCounted implements Trackabl
   toJSON() {
     const {type, crossSections, orthographicProjection} = this;
     const orthographicProjectionJson = orthographicProjection.toJSON();
+    tmporthographicProjectionJson = orthographicProjectionJson;
     if (crossSections.size === 0 && orthographicProjectionJson === undefined) {
       return type.value;
     }

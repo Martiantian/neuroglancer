@@ -39,6 +39,8 @@ declare var NEUROGLANCER_SHOW_OBJECT_SELECTION_TOOLTIP: boolean|undefined;
 
 const tempVec3 = vec3.create();
 
+export let tmpLogicalHeight: number;
+
 export interface RenderedDataViewerState extends ViewerState {
   inputEventMap: EventActionMap;
 }
@@ -187,6 +189,7 @@ export abstract class RenderedDataPanel extends RenderedPanel {
       gl.bindBuffer(WebGL2RenderingContext.PIXEL_PACK_BUFFER, buffer);
     }
     const {renderViewport} = this;
+    tmpLogicalHeight = renderViewport.logicalHeight;
     let glWindowX = this.mouseX - renderViewport.visibleLeftFraction * renderViewport.logicalWidth;
     let glWindowY = renderViewport.height -
         (this.mouseY - renderViewport.visibleTopFraction * renderViewport.logicalHeight);

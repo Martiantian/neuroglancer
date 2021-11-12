@@ -60,6 +60,7 @@ export enum OffscreenTextures {
   NUM_TEXTURES
 }
 
+
 export const glsl_perspectivePanelEmit = `
 void emit(vec4 color, highp uint pickId) {
   out_color = color;

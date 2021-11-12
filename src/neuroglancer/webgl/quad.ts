@@ -17,7 +17,7 @@
 /**
  * @file Facilities for drawing quads in WebGL as two triangles.
  */
-
+ 
 export const VERTICES_PER_QUAD = 6;
 export const TRIANGLES_PER_QUAD = 2;
 

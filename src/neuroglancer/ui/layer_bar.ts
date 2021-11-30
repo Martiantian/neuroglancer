@@ -32,6 +32,7 @@ import {makeCloseButton} from 'neuroglancer/widget/close_button';
 import {makeDeleteButton} from 'neuroglancer/widget/delete_button';
 import {makeIcon} from 'neuroglancer/widget/icon';
 import {PositionWidget} from 'neuroglancer/widget/position_widget';
+import {Annotation2UserLayer} from 'neuroglancer/annotation/user_layer';
 
 
 class LayerWidget extends RefCounted {
@@ -337,6 +338,15 @@ export class LayerBar extends RefCounted {
     this.manager.rootLayers.updateNonArchivedLayerIndices();
     for (const layer of this.manager.layerManager.managedLayers) {
       if (layer.archived && !this.dropLayers?.layers.has(layer)) continue;
+      if (this.selectedLayer.layer.layer instanceof Annotation2UserLayer) {
+        if (layer.layer instanceof Annotation2UserLayer) {
+          if (layer === this.selectedLayer.layer) {
+            layer.setVisible(true);
+          } else {
+            layer.setVisible(false);
+          }
+        }
+      }
       layers.add(layer);
       let widget = this.layerWidgets.get(layer);
       const layerIndex = layer.nonArchivedLayerIndex;

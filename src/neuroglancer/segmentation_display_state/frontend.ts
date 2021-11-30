@@ -369,12 +369,16 @@ function makeRegisterSegmentWidgetEventHandlers(displayState: SegmentationDispla
     event.stopPropagation();
   };
 
+  const tmptype = displayState.layer.linkedSegmentationLayers.annotationStates.relationships[0];
   const visibleCheckboxHandler = (event: Event) => {
     const entryElement = getEntryElement(event);
     const idString = entryElement.dataset.id!;
     const id = tempStatedColor;
     id.tryParseString(idString);
     const {visibleSegments} = displayState.segmentationGroupState.value;
+    if (tmptype == "gene_expression") {
+      visibleSegments.clear();
+    }
     visibleSegments.set(id, !visibleSegments.has(id));
     event.stopPropagation();
   };
@@ -402,6 +406,12 @@ function makeRegisterSegmentWidgetEventHandlers(displayState: SegmentationDispla
   return (element: HTMLElement, template: SegmentWidgetTemplate) => {
     const {children} = element;
     const stickyChildren = children[0].children;
+    
+    if (tmptype == "gene_expression") {
+      stickyChildren[1].type = 'radio';
+      stickyChildren[1].name = 'segments';
+    }
+
     element.addEventListener('mousedown', onMousedown);
     const copyContainer = stickyChildren[template.copyContainerIndex] as HTMLElement;
     if (template.unmappedCopyIndex !== -1) {

@@ -26,10 +26,10 @@ import {LoadedDataSubsource} from 'neuroglancer/layer_data_source';
 import {Overlay} from 'neuroglancer/overlay';
 import {getWatchableRenderLayerTransform} from 'neuroglancer/render_coordinate_transform';
 import {RenderLayerRole} from 'neuroglancer/renderlayer';
-import {SegmentationDisplayState} from 'neuroglancer/segmentation_display_state/frontend';
+import {SegmentationDisplayState, bindSegmentListWidth, augmentSegmentId} from 'neuroglancer/segmentation_display_state/frontend';
 import {SegmentationUserLayer} from 'neuroglancer/segmentation_user_layer';
 import {TrackableBoolean, TrackableBooleanCheckbox} from 'neuroglancer/trackable_boolean';
-import {makeCachedLazyDerivedWatchableValue, WatchableValue} from 'neuroglancer/trackable_value';
+import {makeCachedLazyDerivedWatchableValue, WatchableValue, TrackableValue, registerNestedSync} from 'neuroglancer/trackable_value';
 import {AnnotationLayerView, MergedAnnotationStates, UserLayerWithAnnotationsMixin} from 'neuroglancer/ui/annotations';
 import {animationFrameDebounce} from 'neuroglancer/util/animation_frame_debounce';
 import {Borrowed, Owned, RefCounted} from 'neuroglancer/util/disposable';
@@ -44,6 +44,14 @@ import {RenderScaleWidget} from 'neuroglancer/widget/render_scale_widget';
 import {ShaderCodeWidget} from 'neuroglancer/widget/shader_code_widget';
 import {registerLayerShaderControlsTool, ShaderControls} from 'neuroglancer/widget/shader_controls';
 import {Tab} from 'neuroglancer/widget/tab_view';
+import {SegmentDisplay2Tab} from 'neuroglancer/ui/segment_list';
+import {SegmentationUserLayerDisplayState2} from 'neuroglancer/segmentation_user_layer';
+import {Uint64} from 'neuroglancer/util/uint64';
+import {RenderLayerTransform} from 'neuroglancer/render_coordinate_transform';
+import {MultiscaleMeshLayer} from 'neuroglancer/mesh/frontend';
+import {StatusMessage} from 'neuroglancer/status';
+import {getPreprocessedSegmentPropertyMap, SegmentPropertyMap} from 'neuroglancer/segmentation_display_state/property_map';
+import {SegmentationGraphSource} from 'neuroglancer/segmentation_graph/source';
 
 const POINTS_JSON_KEY = 'points';
 const ANNOTATIONS_JSON_KEY = 'annotations';
@@ -76,6 +84,9 @@ function isValidLinkedSegmentationLayer(layer: ManagedUserLayer) {
   if (userLayer instanceof SegmentationUserLayer) {
     return true;
   }
+  if (userLayer instanceof Annotation2UserLayer) {
+    return true;
+  }
   return false;
 }
 
@@ -88,7 +99,7 @@ function getSegmentationDisplayState(layer: ManagedUserLayer|undefined): Segment
   if (userLayer === null) {
     return null;
   }
-  if (!(userLayer instanceof SegmentationUserLayer)) {
+  if (!(userLayer instanceof SegmentationUserLayer || userLayer instanceof Annotation2UserLayer )) {
     return null;
   }
   return userLayer.displayState;
@@ -549,7 +560,318 @@ export class AnnotationUserLayer extends Base {
   static typeAbbreviation = 'ann';
 }
 
-function makeShaderCodeWidget(layer: AnnotationUserLayer) {
+export class Annotation2UserLayer extends Base {
+  localAnnotations: LocalAnnotationSource | undefined;
+  private localAnnotationProperties: AnnotationPropertySpec[] | undefined;
+  private localAnnotationRelationships: string[];
+  annotationProperties = new WatchableValue<AnnotationPropertySpec[] | undefined>(undefined);
+  private localAnnotationsJson: any = undefined;
+  private pointAnnotationsJson: any = undefined;
+  linkedSegmentationLayers = this.registerDisposer(new LinkedSegmentationLayers(
+    this.manager.rootLayers, this.annotationStates, this.annotationDisplayState));
+
+  disposed() {
+    const { localAnnotations } = this;
+    if (localAnnotations !== undefined) {
+      localAnnotations.dispose();
+    }
+    super.disposed();
+  }
+
+  bindSegmentListWidth(element: HTMLElement) {
+    return bindSegmentListWidth(this.displayState, element);
+  }
+
+  segmentQueryFocusTime = new WatchableValue<number>(Number.NEGATIVE_INFINITY);
+  selectSegment = (id: Uint64, pin: boolean | 'toggle') => {
+    this.manager.root.selectionState.captureSingleLayerState(this, state => {
+      state.value = id.clone();
+      return true;
+    }, pin);
+  };
+
+  filterBySegmentLabel = (id: Uint64) => {
+    const augmented = augmentSegmentId(this.displayState, id);
+    const { label } = augmented;
+    if (!label) return;
+    this.filterSegments(label);
+  };
+
+  filterSegments = (query: string) => {
+    this.displayState.segmentationGroupState.value.segmentQuery.value = query;
+    this.segmentQueryFocusTime.value = Date.now();
+    this.tabs.value = 'segments';
+    this.manager.root.selectedLayer.layer = this.managedLayer;
+  };
+
+  displayState = new SegmentationUserLayerDisplayState2(this);
+
+  anchorSegment = new TrackableValue<Uint64 | undefined>(
+    undefined, x => x === undefined ? undefined : Uint64.parseString(x));
+
+
+  constructor(managedLayer: Borrowed<ManagedUserLayer>) {
+    super(managedLayer);
+    this.registerDisposer(registerNestedSync((context, group) => {
+      context.registerDisposer(group.specificationChanged.add(this.specificationChanged.dispatch));
+      this.specificationChanged.dispatch();
+    }, this.displayState.segmentationGroupState));
+    this.registerDisposer(registerNestedSync((context, group) => {
+      context.registerDisposer(group.specificationChanged.add(this.specificationChanged.dispatch));
+      this.specificationChanged.dispatch();
+    }, this.displayState.segmentationColorGroupState));
+    this.linkedSegmentationLayers.changed.add(this.specificationChanged.dispatch);
+    this.annotationDisplayState.ignoreNullSegmentFilter.changed.add(
+      this.specificationChanged.dispatch);
+    this.annotationCrossSectionRenderScaleTarget.changed.add(this.specificationChanged.dispatch);
+    this.anchorSegment.changed.add(this.specificationChanged.dispatch);
+    this.displayState.linkedSegmentationGroup.changed.add(
+      () => this.updateDataSubsourceActivations());
+    this.tabs.add(
+      'rendering',
+      { label: 'Rendering', order: -100, getter: () => new RenderingOptions2Tab(this) });
+    this.tabs.add(
+      'segments', { label: 'Selections', order: -50, getter: () => new SegmentDisplay2Tab(this) });
+    this.tabs.default = 'annotations';
+  }
+
+  restoreState(specification: any) {
+    super.restoreState(specification);
+    this.linkedSegmentationLayers.restoreState(specification);
+    this.localAnnotationsJson = specification[ANNOTATIONS_JSON_KEY];
+    this.localAnnotationProperties = verifyOptionalObjectProperty(
+      specification, ANNOTATION_PROPERTIES_JSON_KEY, parseAnnotationPropertySpecs);
+    this.localAnnotationRelationships = verifyOptionalObjectProperty(
+      specification, ANNOTATION_RELATIONSHIPS_JSON_KEY, verifyStringArray, ['segments']);
+    this.pointAnnotationsJson = specification[POINTS_JSON_KEY];
+    this.annotationCrossSectionRenderScaleTarget.restoreState(
+      specification[CROSS_SECTION_RENDER_SCALE_JSON_KEY]);
+    this.annotationProjectionRenderScaleTarget.restoreState(
+      specification[PROJECTION_RENDER_SCALE_JSON_KEY]);
+    this.annotationDisplayState.ignoreNullSegmentFilter.restoreState(
+      specification[IGNORE_NULL_SEGMENT_FILTER_JSON_KEY]);
+    this.annotationDisplayState.shader.restoreState(specification[SHADER_JSON_KEY]);
+    this.annotationDisplayState.shaderControls.restoreState(
+      specification[SHADER_CONTROLS_JSON_KEY]);
+  }
+
+  getLegacyDataSourceSpecifications(
+    sourceSpec: any, layerSpec: any, legacyTransform: CoordinateTransformSpecification | undefined,
+    explicitSpecs: DataSourceSpecification[]): DataSourceSpecification[] {
+    if (Object.prototype.hasOwnProperty.call(layerSpec, 'source')) {
+      return super.getLegacyDataSourceSpecifications(
+        sourceSpec, layerSpec, legacyTransform, explicitSpecs);
+    }
+    const scales = verifyOptionalObjectProperty(
+      layerSpec, 'voxelSize',
+      voxelSizeObj => parseFixedLengthArray(
+        new Float64Array(3), voxelSizeObj, x => verifyFinitePositiveFloat(x) / 1e9));
+    const units = ['m', 'm', 'm'];
+    if (scales !== undefined) {
+      const inputSpace = makeCoordinateSpace({ rank: 3, units, scales, names: ['x', 'y', 'z'] });
+      if (legacyTransform === undefined) {
+        legacyTransform = {
+          outputSpace: inputSpace,
+          sourceRank: 3,
+          transform: undefined,
+          inputSpace,
+        };
+      } else {
+        legacyTransform = {
+          ...legacyTransform,
+          inputSpace,
+        };
+      }
+    }
+    return [{
+      url: localAnnotationsUrl,
+      transform: legacyTransform,
+      enableDefaultSubsources: true,
+      subsources: new Map(),
+    }];
+  }
+
+  activateDataSubsources(subsources: Iterable<LoadedDataSubsource>) {
+    let hasLocalAnnotations = false;
+    let properties: AnnotationPropertySpec[] | undefined;
+    const updatedSegmentPropertyMaps: SegmentPropertyMap[] = [];
+    let updatedGraph: SegmentationGraphSource | undefined;
+    for (const loadedSubsource of subsources) {
+      const { subsourceEntry } = loadedSubsource;
+      const { local } = subsourceEntry.subsource;
+      const setProperties = (newProperties: AnnotationPropertySpec[]) => {
+        if (properties !== undefined &&
+          stableStringify(newProperties) !== stableStringify(properties)) {
+          loadedSubsource.deactivate('Annotation properties are not compatible');
+          return false;
+        }
+        properties = newProperties;
+        return true;
+      };
+      if (local === LocalDataSource.annotations) {
+        if (hasLocalAnnotations) {
+          loadedSubsource.deactivate('Only one local annotations source per layer is supported');
+          continue;
+        }
+        hasLocalAnnotations = true;
+        if (!setProperties(this.localAnnotationProperties ?? [])) continue;
+        loadedSubsource.activate(refCounted => {
+          const localAnnotations = this.localAnnotations = new LocalAnnotationSource(
+            loadedSubsource.loadedDataSource.transform, this.localAnnotationProperties ?? [],
+            this.localAnnotationRelationships);
+          try {
+            localAnnotations.restoreState(this.localAnnotationsJson);
+          } catch {
+          }
+          refCounted.registerDisposer(() => {
+            localAnnotations.dispose();
+            this.localAnnotations = undefined;
+          });
+          refCounted.registerDisposer(
+            this.localAnnotations.changed.add(this.specificationChanged.dispatch));
+          try {
+            addPointAnnotations(this.localAnnotations, this.pointAnnotationsJson);
+          } catch {
+          }
+          this.pointAnnotationsJson = undefined;
+          this.localAnnotationsJson = undefined;
+          const state = new AnnotationLayerState({
+            localPosition: this.localPosition,
+            transform: refCounted.registerDisposer(getWatchableRenderLayerTransform(
+              this.manager.root.coordinateSpace, this.localPosition.coordinateSpace,
+              loadedSubsource.loadedDataSource.transform, undefined)),
+            source: localAnnotations.addRef(),
+            displayState: this.annotationDisplayState,
+            dataSource: loadedSubsource.loadedDataSource.layerDataSource,
+            subsourceIndex: loadedSubsource.subsourceIndex,
+            subsourceId: subsourceEntry.id,
+            role: RenderLayerRole.ANNOTATION,
+          });
+          this.addAnnotationLayerState(state, loadedSubsource);
+        });
+        continue;
+      }
+      const { annotation } = subsourceEntry.subsource;
+      if (annotation !== undefined) {
+        if (!setProperties(annotation.properties)) continue;
+        loadedSubsource.activate(() => {
+          const state = new AnnotationLayerState({
+            localPosition: this.localPosition,
+            transform: loadedSubsource.getRenderLayerTransform(),
+            source: annotation,
+            displayState: this.annotationDisplayState,
+            dataSource: loadedSubsource.loadedDataSource.layerDataSource,
+            subsourceIndex: loadedSubsource.subsourceIndex,
+            subsourceId: subsourceEntry.id,
+            role: RenderLayerRole.ANNOTATION,
+          });
+          this.addAnnotationLayerState(state, loadedSubsource);
+        });
+        continue;
+      }
+      const { segmentPropertyMap } = loadedSubsource.subsourceEntry.subsource;
+      const isGroupRoot = this.displayState.linkedSegmentationGroup.root.value === this;
+      if (segmentPropertyMap !== undefined) {
+        if (!isGroupRoot) {
+          loadedSubsource.deactivate(`Not supported on non-root linked segmentation layers`);
+        } else {
+          loadedSubsource.activate(() => { });
+          updatedSegmentPropertyMaps.push(segmentPropertyMap);
+          continue;
+        }
+      }
+      loadedSubsource.deactivate('Not compatible with annotation layer');
+    }
+    const prevAnnotationProperties = this.annotationProperties.value;
+    if (stableStringify(prevAnnotationProperties) !== stableStringify(properties)) {
+      this.annotationProperties.value = properties;
+    }
+    this.displayState.originalSegmentationGroupState.segmentPropertyMap.value =
+      getPreprocessedSegmentPropertyMap(this.manager.chunkManager, updatedSegmentPropertyMaps);
+    this.displayState.originalSegmentationGroupState.graph.value = updatedGraph;
+  }
+
+  initializeAnnotationLayerViewTab(tab: AnnotationLayerView) {
+    const hasChunkedSource = tab.registerDisposer(makeCachedLazyDerivedWatchableValue(
+      states => states.some(x => x.source instanceof MultiscaleAnnotationSource),
+      this.annotationStates));
+    const renderScaleControls = tab.registerDisposer(
+      new DependentViewWidget(hasChunkedSource, (hasChunkedSource, parent, refCounted) => {
+        if (!hasChunkedSource) return;
+        {
+          const renderScaleWidget = refCounted.registerDisposer(new RenderScaleWidget(
+            this.annotationCrossSectionRenderScaleHistogram,
+            this.annotationCrossSectionRenderScaleTarget));
+          renderScaleWidget.label.textContent = 'Spacing (cross section)';
+          parent.appendChild(renderScaleWidget.element);
+        }
+        {
+          const renderScaleWidget = refCounted.registerDisposer(new RenderScaleWidget(
+            this.annotationProjectionRenderScaleHistogram,
+            this.annotationProjectionRenderScaleTarget));
+          renderScaleWidget.label.textContent = 'Spacing (projection)';
+          parent.appendChild(renderScaleWidget.element);
+        }
+      }));
+    tab.element.insertBefore(renderScaleControls.element, tab.element.firstChild);
+    {
+      const checkbox = tab.registerDisposer(
+        new TrackableBooleanCheckbox(this.annotationDisplayState.ignoreNullSegmentFilter));
+      const label = document.createElement('label');
+      label.appendChild(document.createTextNode('Ignore null related segment filter'));
+      label.title =
+        'Display all annotations if filtering by related segments is enabled but no segments are selected';
+      label.appendChild(checkbox.element);
+      tab.element.appendChild(label);
+    }
+    tab.element.appendChild(
+      tab.registerDisposer(new LinkedSegmentationLayersWidget(this.linkedSegmentationLayers))
+        .element);
+    //.log(this.linkedSegmentationLayers.annotationStates.relationships.length);
+  }
+
+  toJSON() {
+    const x = super.toJSON();
+    x[CROSS_SECTION_RENDER_SCALE_JSON_KEY] = this.annotationCrossSectionRenderScaleTarget.toJSON();
+    x[PROJECTION_RENDER_SCALE_JSON_KEY] = this.annotationProjectionRenderScaleTarget.toJSON();
+    if (this.localAnnotations !== undefined) {
+      x[ANNOTATIONS_JSON_KEY] = this.localAnnotations.toJSON();
+    } else if (this.localAnnotationsJson !== undefined) {
+      x[ANNOTATIONS_JSON_KEY] = this.localAnnotationsJson;
+    }
+    x[ANNOTATION_PROPERTIES_JSON_KEY] =
+      annotationPropertySpecsToJson(this.localAnnotationProperties);
+    const { localAnnotationRelationships } = this;
+    x[ANNOTATION_RELATIONSHIPS_JSON_KEY] = (localAnnotationRelationships.length === 1 &&
+      localAnnotationRelationships[0] === 'segments') ?
+      undefined :
+      localAnnotationRelationships;
+    x[IGNORE_NULL_SEGMENT_FILTER_JSON_KEY] =
+      this.annotationDisplayState.ignoreNullSegmentFilter.toJSON();
+    x[SHADER_JSON_KEY] = this.annotationDisplayState.shader.toJSON();
+    x[SHADER_CONTROLS_JSON_KEY] = this.annotationDisplayState.shaderControls.toJSON();
+    Object.assign(x, this.linkedSegmentationLayers.toJSON());
+    return x;
+  }
+
+
+  moveToSegment(id: Uint64) {
+    for (const layer of this.renderLayers) {
+      if (!(layer instanceof MultiscaleMeshLayer)) continue;
+      const layerPosition = layer.getObjectPosition(id);
+      if (layerPosition === undefined) continue;
+      this.setLayerPosition(
+        layer.displayState.transform.value as RenderLayerTransform, layerPosition);
+      return;
+    }
+    StatusMessage.showTemporaryMessage(`No position information loaded for segment ${id}`);
+  }
+
+
+  static type = 'BGI-annotation';
+  static typeAbbreviation = 'BGI-ann';
+}
+function makeShaderCodeWidget(layer: AnnotationUserLayer | Annotation2UserLayer) {
   return new ShaderCodeWidget({
     shaderError: layer.annotationDisplayState.shaderError,
     fragmentMain: layer.annotationDisplayState.shader,
@@ -559,7 +881,7 @@ function makeShaderCodeWidget(layer: AnnotationUserLayer) {
 
 class ShaderCodeOverlay extends Overlay {
   codeWidget = this.registerDisposer(makeShaderCodeWidget(this.layer));
-  constructor(public layer: AnnotationUserLayer) {
+  constructor(public layer: AnnotationUserLayer | Annotation2UserLayer) {
     super();
     this.content.appendChild(this.codeWidget.element);
     this.codeWidget.textEditor.refresh();
@@ -628,19 +950,82 @@ class RenderingOptionsTab extends Tab {
   }
 }
 
+class RenderingOptions2Tab extends Tab {
+  codeWidget = this.registerDisposer(makeShaderCodeWidget(this.layer));
+  constructor(public layer: Annotation2UserLayer) {
+    super();
+    const { element } = this;
+    element.classList.add('neuroglancer-annotation-rendering-tab');
+    element.appendChild(
+      this
+        .registerDisposer(new DependentViewWidget(
+          layer.annotationProperties,
+          (properties, parent) => {
+            if (properties === undefined || properties.length === 0) return;
+            const propertyList = document.createElement('div');
+            parent.appendChild(propertyList);
+            propertyList.classList.add('neuroglancer-annotation-shader-property-list');
+            for (const property of properties) {
+              const div = document.createElement('div');
+              div.classList.add('neuroglancer-annotation-shader-property');
+              const typeElement = document.createElement('span');
+              typeElement.classList.add('neuroglancer-annotation-shader-property-type');
+              typeElement.textContent = property.type;
+              const nameElement = document.createElement('span');
+              nameElement.classList.add('neuroglancer-annotation-shader-property-identifier');
+              nameElement.textContent = `prop_${property.identifier}`;
+              div.appendChild(typeElement);
+              div.appendChild(nameElement);
+              const { description } = property;
+              if (description !== undefined) {
+                div.title = description;
+              }
+              propertyList.appendChild(div);
+            }
+          }))
+        .element);
+    let topRow = document.createElement('div');
+    topRow.className = 'neuroglancer-segmentation-dropdown-skeleton-shader-header';
+    let label = document.createElement('div');
+    label.style.flex = '1';
+    label.textContent = 'Annotation shader:';
+    topRow.appendChild(label);
+    topRow.appendChild(makeMaximizeButton({
+      title: 'Show larger editor view',
+      onClick: () => {
+        new ShaderCodeOverlay(this.layer);
+      }
+    }));
+    topRow.appendChild(makeHelpButton({
+      title: 'Documentation on annotation rendering',
+      href:
+        'https://github.com/google/neuroglancer/blob/master/src/neuroglancer/annotation/rendering.md',
+    }));
+    element.appendChild(topRow);
+
+    element.appendChild(this.codeWidget.element);
+    element.appendChild(this.registerDisposer(new ShaderControls(
+      layer.annotationDisplayState.shaderControls,
+      this.layer.manager.root.display, this.layer,
+      { visibility: this.visibility }))
+      .element);
+  }
+}
+
 registerLayerType(AnnotationUserLayer);
+registerLayerType(Annotation2UserLayer);
 registerLayerType(AnnotationUserLayer, 'pointAnnotation');
 registerLayerTypeDetector(subsource => {
   if (subsource.local === LocalDataSource.annotations) {
-    return {layerConstructor: AnnotationUserLayer, priority: 100};
+    return {layerConstructor: Annotation2UserLayer, priority: 100};
   }
   if (subsource.annotation !== undefined) {
-    return {layerConstructor: AnnotationUserLayer, priority: 1};
+    return {layerConstructor: Annotation2UserLayer, priority: 1};
   }
   return undefined;
 });
 
 registerLayerShaderControlsTool(
-    AnnotationUserLayer, layer => ({
+    Annotation2UserLayer, layer => ({
                            shaderControlState: layer.annotationDisplayState.shaderControls,
                          }));

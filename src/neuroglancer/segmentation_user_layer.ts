@@ -59,6 +59,7 @@ import {rangeLayerControl} from 'neuroglancer/widget/layer_control_range';
 import {renderScaleLayerControl} from 'neuroglancer/widget/render_scale_widget';
 import {colorSeedLayerControl, fixedColorLayerControl} from 'neuroglancer/widget/segmentation_color_mode';
 import {registerLayerShaderControlsTool} from 'neuroglancer/widget/shader_controls';
+import {Annotation2UserLayer} from 'neuroglancer/annotation/user_layer';
 
 const SELECTED_ALPHA_JSON_KEY = 'selectedAlpha';
 const NOT_SELECTED_ALPHA_JSON_KEY = 'notSelectedAlpha';
@@ -161,6 +162,81 @@ export class SegmentationUserLayerGroupState extends RefCounted implements Segme
       this.layer.registerDisposer(SharedWatchableValue.make(this.layer.manager.rpc, false));
 }
 
+export class SegmentationUserLayerGroupState2 extends RefCounted implements SegmentationGroupState {
+  specificationChanged = new Signal();
+  constructor(public layer: Annotation2UserLayer) {
+    super();
+    const { specificationChanged } = this;
+    this.visibleSegments.changed.add(specificationChanged.dispatch);
+    this.hideSegmentZero.changed.add(specificationChanged.dispatch);
+    this.segmentQuery.changed.add(specificationChanged.dispatch);
+  }
+
+  restoreState(specification: unknown) {
+    verifyOptionalObjectProperty(
+      specification, HIDE_SEGMENT_ZERO_JSON_KEY,
+      value => this.hideSegmentZero.restoreState(value));
+    verifyOptionalObjectProperty(specification, EQUIVALENCES_JSON_KEY, value => {
+      this.localGraph.restoreState(value);
+    });
+
+    verifyOptionalObjectProperty(specification, SEGMENTS_JSON_KEY, segmentsValue => {
+      const { segmentEquivalences, visibleSegments } = this;
+      parseArray(segmentsValue, value => {
+        let id = Uint64.parseString(String(value), 10);
+        visibleSegments.add(segmentEquivalences.get(id));
+      });
+    });
+    verifyOptionalObjectProperty(
+      specification, SEGMENT_QUERY_JSON_KEY, value => this.segmentQuery.restoreState(value));
+  }
+
+  toJSON() {
+    const x: any = {};
+    x[HIDE_SEGMENT_ZERO_JSON_KEY] = this.hideSegmentZero.toJSON();
+    let { visibleSegments } = this;
+    if (visibleSegments.size > 0) {
+      x[SEGMENTS_JSON_KEY] = visibleSegments.toJSON();
+    }
+    let { segmentEquivalences } = this;
+    if (this.localSegmentEquivalences && segmentEquivalences.size > 0) {
+      x[EQUIVALENCES_JSON_KEY] = segmentEquivalences.toJSON();
+    }
+    x[SEGMENT_QUERY_JSON_KEY] = this.segmentQuery.toJSON();
+    return x;
+  }
+
+  assignFrom(other: SegmentationUserLayerGroupState2) {
+    this.maxIdLength.value = other.maxIdLength.value;
+    this.hideSegmentZero.value = other.hideSegmentZero.value;
+    this.visibleSegments.assignFrom(other.visibleSegments);
+    this.segmentEquivalences.assignFrom(other.segmentEquivalences);
+  }
+
+  localGraph = new LocalSegmentationGraphSource();
+  visibleSegments = this.registerDisposer(Uint64Set.makeWithCounterpart(this.layer.manager.rpc));
+  segmentPropertyMap = new WatchableValue<PreprocessedSegmentPropertyMap | undefined>(undefined);
+  graph = new WatchableValue<SegmentationGraphSource | undefined>(undefined);
+  segmentEquivalences = this.registerDisposer(SharedDisjointUint64Sets.makeWithCounterpart(
+    this.layer.manager.rpc,
+    this.layer.registerDisposer(makeCachedDerivedWatchableValue(
+      x => x !== undefined && x.highBitRepresentative, [this.graph]))));
+  localSegmentEquivalences: boolean = false;
+  maxIdLength = new WatchableValue(1);
+  hideSegmentZero = new TrackableBoolean(true, true);
+  segmentQuery = new TrackableValue<string>('', verifyString);
+
+  temporaryVisibleSegments =
+    this.layer.registerDisposer(Uint64Set.makeWithCounterpart(this.layer.manager.rpc));
+  temporarySegmentEquivalences =
+    this.layer.registerDisposer(SharedDisjointUint64Sets.makeWithCounterpart(
+      this.layer.manager.rpc, this.segmentEquivalences.disjointSets.highBitRepresentative));
+  useTemporaryVisibleSegments =
+    this.layer.registerDisposer(SharedWatchableValue.make(this.layer.manager.rpc, false));
+  useTemporarySegmentEquivalences =
+    this.layer.registerDisposer(SharedWatchableValue.make(this.layer.manager.rpc, false));
+}
+
 export class SegmentationUserLayerColorGroupState extends RefCounted implements
     SegmentationColorGroupState {
   specificationChanged = new Signal();
@@ -213,6 +289,58 @@ export class SegmentationUserLayerColorGroupState extends RefCounted implements
   segmentDefaultColor = new TrackableOptionalRGB();
 }
 
+export class SegmentationUserLayerColorGroupState2 extends RefCounted implements
+  SegmentationColorGroupState {
+  specificationChanged = new Signal();
+  constructor(public layer: Annotation2UserLayer) {
+    super();
+    const { specificationChanged } = this;
+    this.segmentColorHash.changed.add(specificationChanged.dispatch);
+    this.segmentStatedColors.changed.add(specificationChanged.dispatch);
+    this.segmentDefaultColor.changed.add(specificationChanged.dispatch);
+  }
+
+  restoreState(specification: unknown) {
+    verifyOptionalObjectProperty(
+      specification, COLOR_SEED_JSON_KEY, value => this.segmentColorHash.restoreState(value));
+    verifyOptionalObjectProperty(
+      specification, SEGMENT_DEFAULT_COLOR_JSON_KEY,
+      value => this.segmentDefaultColor.restoreState(value));
+    verifyOptionalObjectProperty(specification, SEGMENT_STATED_COLORS_JSON_KEY, y => {
+      let result = verifyObjectAsMap(y, x => parseRGBColorSpecification(String(x)));
+      for (let [idStr, colorVec] of result) {
+        const id = Uint64.parseString(String(idStr));
+        const color = new Uint64(packColor(colorVec));
+        this.segmentStatedColors.set(id, color);
+      }
+    });
+  }
+
+  toJSON() {
+    const x: any = {};
+    x[COLOR_SEED_JSON_KEY] = this.segmentColorHash.toJSON();
+    x[SEGMENT_DEFAULT_COLOR_JSON_KEY] = this.segmentDefaultColor.toJSON();
+    const { segmentStatedColors } = this;
+    if (segmentStatedColors.size > 0) {
+      const j: any = x[SEGMENT_STATED_COLORS_JSON_KEY] = {};
+      for (const [key, value] of segmentStatedColors) {
+        j[key.toString()] = serializeColor(unpackRGB(value.low));
+      }
+    }
+    return x;
+  }
+
+  assignFrom(other: SegmentationUserLayerColorGroupState2) {
+    this.segmentColorHash.value = other.segmentColorHash.value;
+    this.segmentStatedColors.assignFrom(other.segmentStatedColors);
+    this.segmentDefaultColor.value = other.segmentDefaultColor.value;
+  }
+
+  segmentColorHash = SegmentColorHash.getDefault();
+  segmentStatedColors = this.registerDisposer(new Uint64Map());
+  segmentDefaultColor = new TrackableOptionalRGB();
+}
+
 class LinkedSegmentationGroupState<State extends SegmentationUserLayerGroupState|
                                    SegmentationUserLayerColorGroupState> extends RefCounted
     implements WatchableValueInterface<State> {
@@ -243,6 +371,42 @@ class LinkedSegmentationGroupState<State extends SegmentationUserLayerGroupState
   constructor(public linkedGroup: LinkedLayerGroup,
               private propertyName: State extends SegmentationUserLayerGroupState?
               'originalSegmentationGroupState': 'originalSegmentationColorGroupState') {
+    super();
+    this.value;
+  }
+}
+
+
+class LinkedSegmentationGroupState2<State extends SegmentationUserLayerGroupState2 |
+  SegmentationUserLayerColorGroupState2> extends RefCounted
+  implements WatchableValueInterface<State> {
+  private curRoot: Annotation2UserLayer | undefined;
+  private curGroupState: Owned<State> | undefined;
+  get changed() {
+    return this.linkedGroup.root.changed;
+  }
+  get value() {
+    const root = this.linkedGroup.root.value as Annotation2UserLayer;
+    if (root !== this.curRoot) {
+      this.curRoot = root;
+      const groupState = root.displayState[this.propertyName] as State;
+      if (root === this.linkedGroup.layer) {
+        const { curGroupState } = this;
+        if (curGroupState !== undefined) {
+          groupState.assignFrom(curGroupState as any);
+          curGroupState.dispose();
+        }
+      }
+      this.curGroupState = groupState.addRef() as State;
+    }
+    return this.curGroupState!;
+  }
+  disposed() {
+    this.curGroupState?.dispose();
+  }
+  constructor(public linkedGroup: LinkedLayerGroup,
+    private propertyName: State extends SegmentationUserLayerGroupState2 ?
+      'originalSegmentationGroupState' : 'originalSegmentationColorGroupState') {
     super();
     this.value;
   }
@@ -323,6 +487,81 @@ class SegmentationUserLayerDisplayState implements SegmentationDisplayState {
   segmentPropertyMap: WatchableValueInterface<PreprocessedSegmentPropertyMap|undefined>;
 }
 
+
+export class SegmentationUserLayerDisplayState2 implements SegmentationDisplayState {
+  constructor(public layer: Annotation2UserLayer) {
+    // Even though `SegmentationUserLayer` assigns this to its `displayState` property, redundantly
+    // assign it here first in order to allow it to be accessed by `segmentationGroupState`.
+    layer.displayState = this;
+    this.segmentationGroupState = this.layer.registerDisposer(
+      new LinkedSegmentationGroupState2<SegmentationUserLayerGroupState2>(
+        this.linkedSegmentationGroup, 'originalSegmentationGroupState'));
+    this.segmentationColorGroupState = this.layer.registerDisposer(
+      new LinkedSegmentationGroupState2<SegmentationUserLayerColorGroupState2>(
+        this.linkedSegmentationColorGroup, 'originalSegmentationColorGroupState'));
+
+    this.hideSegmentZero = this.layer.registerDisposer(
+      new IndirectWatchableValue(this.segmentationGroupState, group => group.hideSegmentZero));
+    this.segmentColorHash = this.layer.registerDisposer(new IndirectTrackableValue(
+      this.segmentationColorGroupState, group => group.segmentColorHash));
+    this.segmentStatedColors = this.layer.registerDisposer(new IndirectTrackableValue(
+      this.segmentationColorGroupState, group => group.segmentStatedColors));
+    this.segmentDefaultColor = this.layer.registerDisposer(new IndirectTrackableValue(
+      this.segmentationColorGroupState, group => group.segmentDefaultColor));
+    this.segmentQuery = this.layer.registerDisposer(
+      new IndirectWatchableValue(this.segmentationGroupState, group => group.segmentQuery));
+    this.segmentPropertyMap = this.layer.registerDisposer(
+      new IndirectWatchableValue(this.segmentationGroupState, group => group.segmentPropertyMap));
+  }
+
+  segmentSelectionState = new SegmentSelectionState();
+  selectedAlpha = trackableAlphaValue(0.5);
+  saturation = trackableAlphaValue(1.0);
+  notSelectedAlpha = trackableAlphaValue(0);
+  silhouetteRendering = new TrackableValue<number>(0, verifyFiniteNonNegativeFloat, 0);
+  objectAlpha = trackableAlphaValue(1.0);
+  ignoreNullVisibleSet = new TrackableBoolean(true, true);
+  skeletonRenderingOptions = new SkeletonRenderingOptions();
+  shaderError = makeWatchableShaderError();
+  renderScaleHistogram = new RenderScaleHistogram();
+  renderScaleTarget = trackableRenderScaleTarget(1);
+  selectSegment = this.layer.selectSegment;
+  transparentPickEnabled = this.layer.pick;
+  baseSegmentColoring = new TrackableBoolean(false, false);
+
+  filterBySegmentLabel = this.layer.filterBySegmentLabel;
+
+  moveToSegment = (id: Uint64) => {
+    this.layer.moveToSegment(id);
+  };
+
+  linkedSegmentationGroup: LinkedLayerGroup = this.layer.registerDisposer(new LinkedLayerGroup(
+    this.layer.manager.rootLayers, this.layer,
+    userLayer => (userLayer instanceof Annotation2UserLayer),
+    (userLayer: Annotation2UserLayer) => userLayer.displayState.linkedSegmentationGroup));
+
+  linkedSegmentationColorGroup: LinkedLayerGroup = this.layer.registerDisposer(new LinkedLayerGroup(
+    this.layer.manager.rootLayers, this.layer,
+    userLayer => (userLayer instanceof Annotation2UserLayer),
+    (userLayer: Annotation2UserLayer) => userLayer.displayState.linkedSegmentationColorGroup));
+
+  originalSegmentationGroupState =
+    this.layer.registerDisposer(new SegmentationUserLayerGroupState2(this.layer));
+
+  originalSegmentationColorGroupState =
+    this.layer.registerDisposer(new SegmentationUserLayerColorGroupState2(this.layer));
+
+  segmentationGroupState: WatchableValueInterface<SegmentationUserLayerGroupState2>;
+  segmentationColorGroupState: WatchableValueInterface<SegmentationUserLayerColorGroupState2>;
+
+  // Indirect properties
+  hideSegmentZero: WatchableValueInterface<boolean>;
+  segmentColorHash: TrackableValueInterface<number>;
+  segmentStatedColors: WatchableValueInterface<Uint64Map>;
+  segmentDefaultColor: WatchableValueInterface<vec3 | undefined>;
+  segmentQuery: WatchableValueInterface<string>;
+  segmentPropertyMap: WatchableValueInterface<PreprocessedSegmentPropertyMap | undefined>;
+}
 interface SegmentationActionContext extends LayerActionContext {
   // Restrict the `select` action not to both toggle on and off segments.  If segment would be
   // toggled on in at least one layer, only toggle segments on.

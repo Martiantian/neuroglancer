@@ -41,10 +41,12 @@ import {clampToInterval, computeInvlerp, dataTypeCompare, DataTypeInterval, data
 import {CdfController, getUpdatedRangeAndWindowParameters, RangeAndWindowIntervals} from 'neuroglancer/widget/invlerp';
 import {makeToolButton} from 'neuroglancer/ui/tool';
 import {ANNOTATE_MERGE_SEGMENTS_TOOL_ID, ANNOTATE_SPLIT_SEGMENTS_TOOL_ID} from 'neuroglancer/ui/segment_split_merge_tools';
+import {Annotation2UserLayer} from 'neuroglancer/annotation/user_layer';
+
 
 const tempUint64 = new Uint64();
 
-class SegmentListSource extends RefCounted implements VirtualListSource {
+export class SegmentListSource extends RefCounted implements VirtualListSource {
   length: number;
 
   changed = new Signal<(splices: readonly Readonly<ArraySpliceOp>[]) => void>();
@@ -216,11 +218,17 @@ class SegmentListSource extends RefCounted implements VirtualListSource {
   }
 }
 
-const keyMap = EventActionMap.fromObject({
+export const keyMap = EventActionMap.fromObject({
   'enter': {action: 'toggle-listed'},
   'shift+enter': {action: 'hide-listed'},
   'control+enter': {action: 'hide-all'},
   'escape': {action: 'cancel'},
+});
+
+export const keyMap2 = EventActionMap.fromObject({
+  'shift+enter': { action: 'hide-listed' },
+  'control+enter': { action: 'hide-all' },
+  'escape': { action: 'cancel' },
 });
 
 const selectSegmentConfirmationThreshold = 100;
@@ -297,7 +305,7 @@ function toggleIncludeColumn(
   setQuery({...query, sortBy, includeColumns});
 }
 
-function toggleSortOrder(
+export function toggleSortOrder(
     queryResult: QueryResult|undefined, setQuery: (query: FilterQuery) => void, id: string) {
   const query = queryResult?.query;
   const sortBy = query?.sortBy;
@@ -318,7 +326,7 @@ function toggleSortOrder(
   });
 }
 
-function updateColumnSortIcon(
+export function updateColumnSortIcon(
     queryResult: QueryResult|undefined, sortIcon: HTMLElement, id: string) {
   const sortBy = queryResult?.query?.sortBy;
   const order = sortBy?.find(s => s.fieldId === id)?.order;
@@ -327,7 +335,7 @@ function updateColumnSortIcon(
   sortIcon.title = `Sort by ${id} in ${order === '<' ? 'descending' : 'ascending'} order`;
 }
 
-class NumericalPropertiesSummary extends RefCounted {
+export class NumericalPropertiesSummary extends RefCounted {
   listElement: HTMLElement|undefined;
   properties: NumericalPropertySummary[];
   propertyHistograms: PropertyHistogram[] = [];
@@ -703,7 +711,7 @@ class NumericalPropertiesSummary extends RefCounted {
   }
 }
 
-function renderTagSummary(
+export function renderTagSummary(
     queryResult: QueryResult, setQuery: (query: FilterQuery) => void): HTMLElement|undefined {
   const {tags} = queryResult;
   if (tags === undefined || tags.length === 0) return undefined;
@@ -824,7 +832,6 @@ export class SegmentDisplayTab extends Tab {
         this.layer.segmentQueryFocusTime.value = Number.NEGATIVE_INFINITY;
       }
     }, this.layer.segmentQueryFocusTime));
-
     element.appendChild(queryElement);
     element.appendChild(
         this
@@ -1073,5 +1080,347 @@ export class SegmentDisplayTab extends Tab {
                   parent.appendChild(list.element);
                 }))
             .element);
+  }
+}
+
+
+
+export class SegmentDisplay2Tab extends Tab {
+  constructor(public layer: Annotation2UserLayer) {
+    super();
+    const { element } = this;
+    element.classList.add('neuroglancer-segment-display-tab');
+
+/*    let singleselectiontype: number = 1;
+    const checktypeContainer = document.createElement('span');
+    const checktypeButton = document.createElement('input');
+    checktypeButton.type = 'checkbox';
+    checktypeButton.title = 'Single choice mode';
+    checktypeButton.addEventListener('change', () => {
+      singleselectiontype = 1 - singleselectiontype;
+    });
+
+    const checktypeStatusMessage = document.createElement('span');
+    checktypeContainer.appendChild(checktypeButton);
+    checktypeContainer.appendChild(checktypeStatusMessage);
+    checktypeStatusMessage.textContent = "single selection mode";
+
+    element.appendChild(checktypeContainer);*/
+
+    element.appendChild(
+      this.registerDisposer(new DependentViewWidget(
+        layer.displayState.segmentationGroupState.value.graph,
+        (graph, parent, context) => {
+          if (graph === undefined) return;
+          const toolbox = document.createElement('div');
+          toolbox.className = 'neuroglancer-segmentation-toolbox';
+          toolbox.appendChild(makeToolButton(context, layer, {
+            toolJson: ANNOTATE_MERGE_SEGMENTS_TOOL_ID,
+            label: 'Merge',
+            title: 'Merge segments'
+          }));
+          toolbox.appendChild(makeToolButton(context, layer, {
+            toolJson: ANNOTATE_SPLIT_SEGMENTS_TOOL_ID,
+            label: 'Split',
+            title: 'Split segments'
+          }));
+          parent.appendChild(toolbox);
+        }))
+        .element);
+    const queryElement = document.createElement('input');
+    queryElement.classList.add('neuroglancer-segment-list-query');
+    queryElement.addEventListener('focus', () => {
+      queryElement.select();
+    });
+
+    const tmptype = this.layer.displayState.layer.linkedSegmentationLayers.annotationStates.relationships[0];
+  
+    const keyboardHandler = this.registerDisposer(new KeyboardEventBinder(queryElement, keyMap2));
+    keyboardHandler.allShortcutsAreGlobal = true;
+    const { segmentQuery } = this.layer.displayState;
+    //console.log(this.layer.displayState.layer.linkedSegmentationLayers.annotationStates.relationships[0]);
+
+    const debouncedUpdateQueryModel = this.registerCancellable(debounce(() => {
+      segmentQuery.value = queryElement.value;
+    }, 200));
+    queryElement.autocomplete = 'off';
+    queryElement.title = keyMap2.describe();
+
+    queryElement.spellcheck = false;
+    queryElement.placeholder = 'Enter ID, name prefix or /regexp';
+    this.registerDisposer(observeWatchable(q => {
+      queryElement.value = q;
+    }, segmentQuery));
+    this.registerDisposer(observeWatchable(t => {
+      if (Date.now() - t < 100) {
+        setTimeout(() => {
+          queryElement.focus();
+        }, 0);
+        this.layer.segmentQueryFocusTime.value = Number.NEGATIVE_INFINITY;
+      }
+    }, this.layer.segmentQueryFocusTime));
+    element.appendChild(queryElement);
+    element.appendChild(
+      this
+        .registerDisposer(new DependentViewWidget(
+          // segmentLabelMap is guaranteed to change if segmentationGroupState changes.
+          layer.displayState.segmentPropertyMap,
+          (segmentPropertyMap, parent, context) => {
+            const setQuery = (newQuery: ExplicitIdQuery | FilterQuery) => {
+              queryElement.focus();
+              queryElement.select();
+              const value = unparseSegmentQuery(segmentPropertyMap, newQuery);
+              document.execCommand('insertText', false, value);
+              segmentQuery.value = value;
+              queryElement.select();
+            };
+            const listSource = context.registerDisposer(new SegmentListSource(
+              segmentQuery, segmentPropertyMap, layer.displayState, parent));
+            const group = layer.displayState.segmentationGroupState.value;
+            const queryErrors = document.createElement('ul');
+            queryErrors.classList.add('neuroglancer-segment-query-errors');
+            parent.appendChild(queryErrors);
+            const queryStatisticsContainer = document.createElement('div');
+            queryStatisticsContainer.classList.add(
+              'neuroglancer-segment-query-result-statistics');
+            
+
+
+            const selectionStatusContainer = document.createElement('span');
+
+
+            const selectionClearButton = document.createElement('input');
+            selectionClearButton.type = 'checkbox';
+            selectionClearButton.checked = true;
+            selectionClearButton.title = 'Deselect all segment IDs';
+            selectionClearButton.addEventListener('change', () => {
+              group.visibleSegments.clear();
+            });
+            const selectionCopyButton = makeCopyButton({
+              title: 'Copy visible segment IDs',
+              onClick: () => {
+                const visibleSegments = Array.from(group.visibleSegments, x => x.clone());
+                visibleSegments.sort(Uint64.compare);
+                setClipboard(visibleSegments.join(', '));
+              },
+            });
+            const selectionStatusMessage = document.createElement('span');
+
+
+            selectionStatusContainer.appendChild(selectionCopyButton);
+            selectionStatusContainer.appendChild(selectionClearButton);
+            selectionStatusContainer.appendChild(selectionStatusMessage);
+            const matchStatusContainer = document.createElement('span');
+            const matchCheckbox = document.createElement('input');
+            const matchCopyButton = makeCopyButton({
+              onClick: () => {
+                debouncedUpdateQueryModel();
+                debouncedUpdateQueryModel.flush();
+                listSource.debouncedUpdate.flush();
+                const queryResult = listSource.queryResult.value;
+                if (queryResult === undefined) return;
+                const segmentStrings = new Array<string>(queryResult.count);
+                forEachQueryResultSegmentId(segmentPropertyMap, queryResult, (id, i) => {
+                  segmentStrings[i] = id.toString();
+                });
+                setClipboard(segmentStrings.join(', '));
+              },
+            });
+            matchCheckbox.type = 'checkbox';
+            const toggleMatches = () => {
+              debouncedUpdateQueryModel();
+              debouncedUpdateQueryModel.flush();
+              listSource.debouncedUpdate.flush();
+              const queryResult = listSource.queryResult.value;
+              if (queryResult === undefined) return;
+              const { visibleSegments } = group;
+              const { selectedMatches } = listSource;
+              const shouldSelect = (selectedMatches !== queryResult.count);
+              if (shouldSelect &&
+                queryResult.count - selectedMatches > selectSegmentConfirmationThreshold) {
+                if (!hasConfirmed) {
+                  hasConfirmed = true;
+                  matchStatusMessage.textContent =
+                    `Confirm: show ${queryResult.count - selectedMatches} segments?`;
+                  return false;
+                }
+                hasConfirmed = false;
+                updateStatus();
+              }
+              forEachQueryResultSegmentId(segmentPropertyMap, queryResult, id => {
+                visibleSegments.set(id, shouldSelect);
+              });
+              return true;
+            };
+            matchCheckbox.addEventListener('click', event => {
+              if (!toggleMatches()) event.preventDefault();
+            });
+            const matchStatusMessage = document.createElement('span');
+            
+            //if (singleselectiontype == 0) {
+            if (tmptype == 'bin_type') {
+              matchStatusContainer.appendChild(matchCopyButton);
+              matchStatusContainer.appendChild(matchCheckbox);
+            }
+            
+            matchStatusContainer.appendChild(matchStatusMessage);
+            selectionStatusContainer.classList.add('neuroglancer-segment-list-status');
+            matchStatusContainer.classList.add('neuroglancer-segment-list-status');
+            
+            parent.appendChild(queryStatisticsContainer);
+            const queryStatisticsSeparator = document.createElement('div');
+            queryStatisticsSeparator.classList.add(
+              'neuroglancer-segment-query-result-statistics-separator');
+            parent.appendChild(queryStatisticsSeparator);
+
+            parent.appendChild(matchStatusContainer);
+            parent.appendChild(selectionStatusContainer);
+            
+            let prevNumSelected = -1;
+            const updateStatus = () => {
+              const numSelected = group.visibleSegments.size;
+              if (prevNumSelected !== numSelected) {
+                prevNumSelected = numSelected;
+                selectionStatusMessage.textContent = `${numSelected} visible in total`;
+                selectionClearButton.checked = numSelected > 0;
+                selectionClearButton.style.visibility = numSelected ? 'visible' : 'hidden';
+                selectionCopyButton.style.visibility = numSelected ? 'visible' : 'hidden';
+              }
+              matchStatusMessage.textContent = listSource.statusText.value;
+              const { numMatches, selectedMatches } = listSource;
+              matchCopyButton.style.visibility = numMatches ? 'visible' : 'hidden';
+              matchCopyButton.title = `Copy ${numMatches} segment ID(s)`;
+              matchCheckbox.style.visibility = numMatches ? 'visible' : 'hidden';
+              if (selectedMatches === 0) {
+                matchCheckbox.checked = false;
+                matchCheckbox.indeterminate = false;
+                matchCheckbox.title = `Show ${numMatches} segment ID(s)`;
+              } else if (selectedMatches === numMatches) {
+                matchCheckbox.checked = true;
+                matchCheckbox.indeterminate = false;
+                matchCheckbox.title = `Hide ${selectedMatches} segment ID(s)`;
+              } else {
+                matchCheckbox.checked = true;
+                matchCheckbox.indeterminate = true;
+                matchCheckbox.title = `Show ${numMatches - selectedMatches} segment ID(s)`;
+              }
+            };
+            updateStatus();
+            listSource.statusText.changed.add(updateStatus);
+            context.registerDisposer(group.visibleSegments.changed.add(updateStatus));
+            let hasConfirmed = false;
+            context.registerEventListener(queryElement, 'input', () => {
+              debouncedUpdateQueryModel();
+              if (hasConfirmed) {
+                hasConfirmed = false;
+                updateStatus();
+              }
+            });
+            context.registerDisposer(registerActionListener(queryElement, 'cancel', () => {
+              queryElement.focus();
+              queryElement.select();
+              document.execCommand('delete');
+              queryElement.blur();
+              queryElement.value = '';
+              segmentQuery.value = '';
+              hasConfirmed = false;
+              updateStatus();
+            }));
+            /*context.registerDisposer(
+              registerActionListener(queryElement, 'toggle-listed', toggleMatches));*/
+            context.registerDisposer(registerActionListener(queryElement, 'hide-all', () => {
+              group.visibleSegments.clear();
+            }));
+            context.registerDisposer(
+              registerActionListener(queryElement, 'hide-listed', () => {
+                debouncedUpdateQueryModel();
+                debouncedUpdateQueryModel.flush();
+                listSource.debouncedUpdate.flush();
+                const { visibleSegments } = group;
+                if (segmentQuery.value === '') {
+                  visibleSegments.clear();
+                } else {
+                  const queryResult = listSource.queryResult.value;
+                  if (queryResult === undefined) return;
+                  forEachQueryResultSegmentId(segmentPropertyMap, queryResult, id => {
+                    visibleSegments.delete(id);
+                  });
+                }
+              }));
+            const list = context.registerDisposer(
+              new VirtualList({ source: listSource, horizontalScroll: true }));
+            const updateListItems = context.registerCancellable(animationFrameDebounce(() => {
+              listSource.updateRenderedItems(list);
+            }));
+            const { displayState } = this.layer;
+            context.registerDisposer(
+              displayState.segmentSelectionState.changed.add(updateListItems));
+            context.registerDisposer(group.visibleSegments.changed.add(updateListItems));
+            context.registerDisposer(
+              displayState.segmentColorHash.changed.add(updateListItems));
+            context.registerDisposer(
+              displayState.segmentStatedColors.changed.add(updateListItems));
+            context.registerDisposer(
+              displayState.segmentDefaultColor.changed.add(updateListItems));
+            list.element.classList.add('neuroglancer-segment-list');
+            context.registerDisposer(layer.bindSegmentListWidth(list.element));
+            context.registerDisposer(
+              new MouseEventBinder(list.element, getDefaultSelectBindings()));
+            const numericalPropertySummaries =
+              context.registerDisposer(new NumericalPropertiesSummary(
+                segmentPropertyMap, listSource.queryResult, setQuery));
+            {
+              const { listElement } = numericalPropertySummaries;
+              if (listElement !== undefined) {
+                queryStatisticsContainer.appendChild(listElement);
+              }
+            }
+            let tagSummary: HTMLElement | undefined = undefined;
+            const updateQueryErrors = (queryResult: QueryResult | undefined) => {
+              const errors = queryResult?.errors;
+              removeChildren(queryErrors);
+              if (errors === undefined) return;
+              for (const error of errors) {
+                const errorElement = document.createElement('li');
+                errorElement.textContent = error.message;
+                queryErrors.appendChild(errorElement);
+              }
+            };
+            observeWatchable((queryResult: QueryResult | undefined) => {
+              listSource.segmentWidgetFactory = new SegmentWidgetWithExtraColumnsFactory(
+                listSource.segmentationDisplayState, listSource.parentElement,
+                property => queryIncludesColumn(queryResult?.query, property.id));
+              list.scrollToTop();
+              removeChildren(list.header);
+              if (segmentPropertyMap !== undefined) {
+                const header = listSource.segmentWidgetFactory.getHeader();
+                header.container.classList.add('neuroglancer-segment-list-header');
+                for (const headerLabel of header.propertyLabels) {
+                  const { label, sortIcon, id } = headerLabel;
+                  label.addEventListener('click', () => {
+                    toggleSortOrder(listSource.queryResult.value, setQuery, id);
+                  });
+                  updateColumnSortIcon(queryResult, sortIcon, id);
+                }
+                list.header.appendChild(header.container);
+              }
+              updateQueryErrors(queryResult);
+              queryStatisticsSeparator.style.display = 'none';
+              tagSummary?.remove();
+              if (queryResult === undefined) return;
+              let { query } = queryResult;
+              if (query.errors !== undefined || query.ids !== undefined) return;
+              tagSummary = renderTagSummary(queryResult, setQuery);
+              if (tagSummary !== undefined) {
+                queryStatisticsContainer.appendChild(tagSummary);
+              }
+              if (numericalPropertySummaries.properties.length > 0 ||
+                tagSummary !== undefined) {
+                queryStatisticsSeparator.style.display = '';
+              }
+            }, listSource.queryResult);
+            parent.appendChild(list.element);
+          }))
+        .element);
   }
 }

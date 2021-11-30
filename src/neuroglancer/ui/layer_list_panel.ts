@@ -34,6 +34,7 @@ import {makeDeleteButton} from 'neuroglancer/widget/delete_button';
 import {makeIcon} from 'neuroglancer/widget/icon';
 
 import {CheckboxIcon} from '../widget/checkbox_icon';
+import {Annotation2UserLayer} from 'neuroglancer/annotation/user_layer';
 
 const DEFAULT_LAYER_LIST_PANEL_LOCATION: SidePanelLocation = {
   ...DEFAULT_SIDE_PANEL_LOCATION,
@@ -228,6 +229,16 @@ export class LayerListPanel extends SidePanel {
       }
       const numberElementWidth = `${(numNonArchivedLayers + 1).toString().length}ch`;
       for (const layer of self.layerManager.managedLayers) {
+        if (selectedLayer.layer instanceof Annotation2UserLayer) {
+          if (layer.layer instanceof Annotation2UserLayer) {
+            if (layer === selectedLayer) {
+              layer.setVisible(true);
+            } else {
+              layer.setVisible(false);
+            }
+          }
+        }
+        
         if (layer.visible) {
           ++numVisible;
         } else if (!layer.archived) {

@@ -60,6 +60,7 @@ export enum OffscreenTextures {
   NUM_TEXTURES
 }
 
+export let tmpperspectiveview_ZoomFactor: number;
 
 export const glsl_perspectivePanelEmit = `
 void emit(vec4 color, highp uint pickId) {
@@ -670,6 +671,7 @@ export class PerspectivePanel extends RenderedDataPanel {
       gl.blendFunc(WebGL2RenderingContext.SRC_ALPHA, WebGL2RenderingContext.ONE_MINUS_SRC_ALPHA);
       const {scaleBars} = this;
       const options = this.viewer.scaleBarOptions.value;
+      tmpperspectiveview_ZoomFactor = this.navigationState.zoomFactor.value;
       scaleBars.draw(
           this.renderViewport, this.navigationState.displayDimensionRenderInfo.value,
           this.navigationState.relativeDisplayScales.value,

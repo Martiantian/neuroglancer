@@ -45,6 +45,8 @@ export enum OffscreenTextures {
   NUM_TEXTURES
 }
 
+export let tmpsliceview_ZoomFactor: number;
+
 function sliceViewPanelEmitColorAndPickID(builder: ShaderBuilder) {
   builder.addOutputBuffer('vec4', 'out_fragColor', 0);
   builder.addOutputBuffer('highp vec4', 'out_pickId', 1);
@@ -286,6 +288,7 @@ export class SliceViewPanel extends RenderedDataPanel {
       if (this.viewer.showScaleBar.value) {
         gl.enable(WebGL2RenderingContext.BLEND);
         gl.blendFunc(WebGL2RenderingContext.SRC_ALPHA, WebGL2RenderingContext.ONE_MINUS_SRC_ALPHA);
+        tmpsliceview_ZoomFactor=this.navigationState.zoomFactor.value;
         this.scaleBars.draw(
             projectionParameters, this.navigationState.displayDimensionRenderInfo.value,
             this.navigationState.relativeDisplayScales.value, this.navigationState.zoomFactor.value,

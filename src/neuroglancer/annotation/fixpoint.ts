@@ -25,9 +25,10 @@ import {defineLineShader, drawLines, initializeLineShader} from 'neuroglancer/we
 import {ShaderBuilder, ShaderProgram} from 'neuroglancer/webgl/shader';
 import {defineVectorArrayVertexShaderInput} from 'neuroglancer/webgl/shader_lib';
 import {defineVertexId, VertexIdHelper} from 'neuroglancer/webgl/vertex_id';
-import {tmpZoomFactor, tmpdisplayDimensionScales} from 'neuroglancer/navigation_state';
-import {tmpLogicalHeight} from 'neuroglancer/rendered_data_panel';
-import {tmporthographicProjectionJson, tmppaneltype} from 'neuroglancer/data_panel_layout';
+import { tmpLogicalHeight } from 'neuroglancer/rendered_data_panel';
+import { tmporthographicProjectionJson } from 'neuroglancer/data_panel_layout';
+import { tmpperspectiveview_ZoomFactor } from 'neuroglancer/perspective_view/panel';
+import { tmpsliceview_ZoomFactor } from 'neuroglancer/sliceview/panel';
 
 class RenderHelper extends AnnotationRenderHelper {
   private defineShaderCommon(builder: ShaderBuilder) {
@@ -87,9 +88,11 @@ if (aperspective_state != 0.0){
    ng_markerDiameter /= zToDivideBy;
    ng_markerBorderWidth /= zToDivideBy;
    ng_markerDiameter *= 3.0;
-   ng_markerBorderWidth *= 3.0;
 }
 ng_markerDiameter *=afactor;
+if (afactor <=0.2){
+  ng_markerBorderWidth=0.0;
+}
 emitCircle(uModelViewProjection *
             vec4(projectModelVectorToSubspace(modelPosition), 1.0), ng_markerDiameter, ng_markerBorderWidth);
 `);
@@ -175,14 +178,13 @@ emitAnnotation(vec4(color.rgb, color.a * ${this.getCrossSectionFadeFactor()}));
           const { gl } = shader;
           let perspective_state = 0.0;
           let factor = 1.0;
-          let tmpscale = 0.0;
-          tmpscale = tmpZoomFactor / tmpLogicalHeight * tmpdisplayDimensionScales[0];
-          console.log(tmpscale);
-          if (tmppaneltype == '3d'){
-            factor = 0.00001 / tmpscale;
+          if (!this.targetIsSliceView  ) {
+            factor = tmpLogicalHeight / tmpperspectiveview_ZoomFactor  ;
             if (tmporthographicProjectionJson === undefined) {
               perspective_state = 1.0;
             }
+          } else {
+            factor = 1 / tmpsliceview_ZoomFactor;
           }
           gl.vertexAttrib1f(shader.attribute('afactor'), factor);
 

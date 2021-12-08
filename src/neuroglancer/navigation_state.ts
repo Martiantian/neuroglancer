@@ -25,9 +25,6 @@ import {optionallyRestoreFromJsonMember, Trackable} from 'neuroglancer/util/trac
 import {TrackableEnum} from 'neuroglancer/util/trackable_enum';
 import * as vector from 'neuroglancer/util/vector';
 
-export let tmpZoomFactor: number;
-export let tmpdisplayDimensionScales: Float64Array;
-
 export enum NavigationLinkType {
   LINKED = 0,
   RELATIVE = 1,
@@ -734,7 +731,6 @@ function getDisplayDimensionRenderInfo(
       displayDimensionUnits[i] = units[dim];
       displayDimensionScales[i] = scales[dim];
     }
-    tmpdisplayDimensionScales = displayDimensionScales;
     
     for (let i = 0; i < displayRank; ++i) {
       canonicalVoxelFactors[i] = voxelPhysicalScales[i] / canonicalVoxelPhysicalSize;
@@ -1242,8 +1238,6 @@ abstract class TrackableZoom extends RefCounted implements Trackable,
    * views, in canonical voxels per viewport height (for orthographic projection).
    */
   get value() {
-    //console.log(this.value_);
-    tmpZoomFactor = this.value_;
     this.handleCoordinateSpaceChanged();
     return this.value_;
   }

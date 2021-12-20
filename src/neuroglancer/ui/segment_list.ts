@@ -1133,8 +1133,10 @@ export class SegmentDisplay2Tab extends Tab {
       queryElement.select();
     });
 
-    const tmptype = this.layer.displayState.layer.linkedSegmentationLayers.annotationStates.relationships[0];
-  
+
+    const tmpname = this.layer.managedLayer.name_;
+    let isgene = tmpname.search(/expression/i);
+
     const keyboardHandler = this.registerDisposer(new KeyboardEventBinder(queryElement, keyMap2));
     keyboardHandler.allShortcutsAreGlobal = true;
     const { segmentQuery } = this.layer.displayState;
@@ -1256,13 +1258,10 @@ export class SegmentDisplay2Tab extends Tab {
               if (!toggleMatches()) event.preventDefault();
             });
             const matchStatusMessage = document.createElement('span');
-            
-            //if (singleselectiontype == 0) {
-            if (tmptype == 'bin_type') {
+            if (isgene == -1) {
               matchStatusContainer.appendChild(matchCopyButton);
               matchStatusContainer.appendChild(matchCheckbox);
             }
-            
             matchStatusContainer.appendChild(matchStatusMessage);
             selectionStatusContainer.classList.add('neuroglancer-segment-list-status');
             matchStatusContainer.classList.add('neuroglancer-segment-list-status');

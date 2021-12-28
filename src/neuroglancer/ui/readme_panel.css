@@ -1,0 +1,56 @@
+/**
+ * @license
+ * Copyright 2018 Google Inc.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+.neuroglancer-use-pannel {
+  width: 85%;
+  height: 85%;
+  position: relative;
+  padding: 1.5em;
+}
+
+.close-button {
+  position: absolute;
+  right: 10px;
+  top: 5px;
+}
+.pre-button, .next-button {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%m -50%);
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: #ccc;
+  border: 1px solid #aaa;
+}
+.pre-button:hover, .next-button:hover {
+  background-color: #0099ff;
+  border-color: #0099ff;
+  color: #fff;
+  cursor: pointer;
+}
+.pre-button {
+  left: 10px;
+}
+.next-button {
+  right: 10px;
+}
+.show-image {
+  width: 100%;
+  max-height: 100%;
+}

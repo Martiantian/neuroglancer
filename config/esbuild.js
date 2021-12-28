@@ -60,6 +60,32 @@ function getCommonPlugins() {
 }
 exports.getCommonPlugins = getCommonPlugins;
 
+// ***test***
+// 拷贝目录
+function copyDir(src, dst) {
+  fs.readdir(src, (err, files) => {
+    if (!err) {
+      if (!fs.existsSync(dst)) {
+        fs.mkdirSync(dst)
+      }
+      files.forEach((item, index) => {
+        const item_path = path.join(src, item)
+        const temp = fs.statSync(item_path)
+        console.log(temp.isFile())
+        if (temp.isFile()) {
+          fs.copyFileSync(item_path, path.join(dst, item))
+        } else if (temp.isDirectory) {
+          fs.mkdir(path.join(dst, item), function () {
+            copyDir(item_path, path.join(dst, item))
+          })
+        }
+      })
+    } else {
+      console.log(err)
+    }
+  })
+}
+
 class Builder {
   constructor(options = {}) {
     const {id = 'min'} = options;
@@ -189,6 +215,11 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
       await fs.promises.copyFile(
           path.resolve(this.srcDir, 'neuroglancer/datasource/boss/bossauth.html'),
           path.resolve(this.outDir, 'bossauth.html'));
+      // ***test***
+      // 复制静态资源目录
+      await copyDir(
+        path.resolve(this.srcDir, 'static'),
+        path.resolve(this.outDir, 'static'));
     }
     await esbuild.build({
       ...this.getBaseEsbuildConfig(),

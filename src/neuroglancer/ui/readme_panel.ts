@@ -40,7 +40,8 @@ const imgMap = [
   'static/01.png',
   'static/02.png',
   'static/03.png',
-  'static/04.png'
+  'static/04.png',
+  'static/05.png'
 ]
 
 export class ReadmeDialog extends Overlay {

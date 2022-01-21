@@ -653,6 +653,8 @@ export class Annotation2UserLayer extends Base {
     this.annotationDisplayState.shader.restoreState(specification[SHADER_JSON_KEY]);
     this.annotationDisplayState.shaderControls.restoreState(
       specification[SHADER_CONTROLS_JSON_KEY]);
+    this.displayState.segmentationGroupState.value.restoreState(specification);
+    this.displayState.segmentationColorGroupState.value.restoreState(specification);
   }
 
   getLegacyDataSourceSpecifications(

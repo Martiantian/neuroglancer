@@ -89,7 +89,9 @@ if (aperspective_state != 0.0){
    ng_markerBorderWidth /= zToDivideBy;
    ng_markerDiameter *= 3.0;
 }
-ng_markerDiameter *=afactor;
+if (scale_state){
+  ng_markerDiameter *=afactor;
+}
 if (afactor <=0.2){
   ng_markerBorderWidth=0.0;
 }

@@ -298,6 +298,11 @@ void setFixpointMarkerBorderColor(vec4 color);
 void setFixpointMarkerSize(float size);
 void setFixpointMarkerBorderWidth(float size);
 void setFixpointMarkerBorderColor(vec3 color) { setFixpointMarkerBorderColor(vec4(color, 1.0)); }
+bool scale_state;
+void setAutoZoom() {
+    scale_state = true;
+}
+
 
 void setEllipsoidFillColor(vec4 color);
 
